@@ -6,12 +6,8 @@ using Microsoft.EntityFrameworkCore;
 using System.Linq.Expressions;
 using System.Net;
 using System.IO;
-using iText.Kernel.Pdf;
-using iText.Layout;
-using iText.Layout.Element;
-using iText.IO.Font.Constants;
-using iText.Kernel.Font;
-using System.Globalization;
+using Microsoft.Extensions.Logging;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
 namespace Acceloka.Services
 {
@@ -25,7 +21,7 @@ namespace Acceloka.Services
             _db = db;
             _logger = logger;
         }
-
+        
         public async Task<object> GetAvailableTickets(
             string? categoryName,
             string? ticketCode,
@@ -48,20 +44,44 @@ namespace Acceloka.Services
                 .Where(t => t.Quota > 0) // Hanya mengambil tiket dengan quota tersedia
                 .AsQueryable();
 
+                // Error Handling
+                var totalTickets = await query.CountAsync();
+                if (totalTickets == 0)
+                {
+                    // Mengembalikan pesan error jika query-nya kosong
+                    return new
+                    {
+                        type = "https://example.com/probs/ticket-not-found",
+                        title = "Ticket Not Found",
+                        status = 404,
+                        detail = $"No ticket found based on the provided parameter.",
+                        instance = $"/api/v1/get-available-ticket"
+                    };
+                }
+
                 // Filtering
-                if (!string.IsNullOrEmpty(categoryName))
-                {
-                    query = query.Where(t => t.TicketCategory.CategoryName.Contains(categoryName));
-                }
+                //if (!string.IsNullOrEmpty(categoryName))
+                //{
+                //    query = query.Where(t => t.TicketCategory.CategoryName.Contains(categoryName));
+                //}
 
-                if (!string.IsNullOrEmpty(ticketCode))
-                {
-                    query = query.Where(t => t.TicketCode.Contains(ticketCode));
-                }
+                //if (!string.IsNullOrEmpty(ticketCode))
+                //{
+                //    query = query.Where(t => t.TicketCode.Contains(ticketCode));
+                //}
 
-                if (!string.IsNullOrEmpty(ticketName))
+                //if (!string.IsNullOrEmpty(ticketName))
+                //{
+                //    query = query.Where(t => t.TicketName.Contains(ticketName));
+                //}
+
+                if (!string.IsNullOrEmpty(categoryName) || !string.IsNullOrEmpty(ticketName) || !string.IsNullOrEmpty(ticketCode))
                 {
-                    query = query.Where(t => t.TicketName.Contains(ticketName));
+                    query = query.Where(t =>
+                        (!string.IsNullOrEmpty(categoryName) && t.TicketCategory.CategoryName.Contains(categoryName)) ||
+                        (!string.IsNullOrEmpty(ticketName) && t.TicketName.Contains(ticketName)) ||
+                        (!string.IsNullOrEmpty(ticketCode) && t.TicketCode.Contains(ticketCode))
+                    );
                 }
 
                 if (maxPrice.HasValue)
@@ -79,22 +99,7 @@ namespace Acceloka.Services
                     query = query.Where(t => t.EventDate <= maxEventDate.Value);
                 }
 
-                // Error Handling
-                var totalTickets = await query.CountAsync();
-                if (totalTickets == 0)
-                {
-                    // Mengembalikan pesan error jika query-nya kosong
-                    return new
-                    {
-                        type = "https://example.com/probs/ticket-not-found",
-                        title = "Ticket Not Found",
-                        status = 404,
-                        detail = $"No ticket found based on the provided parameter.",
-                        instance = $"/api/v1/get-available-ticket"
-                    };
-                }
-
-                // Sorting
+                // Order By
                 switch (orderBy.ToLower())
                 {
                     case "eventdate":
@@ -129,6 +134,7 @@ namespace Acceloka.Services
                     }).ToListAsync();
 
                 _logger.LogInformation("Successfully retrieved {TotalTickets} tickets.", tickets.Count);
+
                 return new 
                 { 
                     Tickets = tickets, 
@@ -144,6 +150,110 @@ namespace Acceloka.Services
                 { 
                     status = 500, 
                     message = "Internal server error occurred while fetching tickets." 
+                };
+            }
+        }
+
+        public async Task<object> GetAvailableTicketsByCategory()
+        {
+            _logger.LogInformation("Fetching available tickets by category name.");
+
+            try
+            {
+                var tickets = await _db.Tickets
+                .Include(t => t.TicketCategory)
+                .Where(t => t.Quota > 0)
+                .ToListAsync();
+
+                // Mengelompokkan setiap tiket berdasarkan kategorinya masing-masing
+                var groupedByCategory = tickets
+                    .GroupBy(t => t.TicketCategory.CategoryName)
+                    .Where(g => g.Any()) // untuk menghinadari kategori kosong
+                    .Select(g => new
+                    {
+                        CategoryName = g.Key,
+                        Tickets = g.Select(t => new
+                        {
+                            EventDate = t.EventDate,
+                            Quota = t.Quota,
+                            TicketCode = t.TicketCode,
+                            TicketName = t.TicketName,
+                            CategoryName = t.TicketCategory.CategoryName,
+                            Price = t.Price
+                        }).ToList()
+                    }).ToList();
+
+                _logger.LogInformation("Successfully retrieved tickets by category name.");
+
+                // Mengembalikan jumlah harga keseluruhan tiket dan output yang dikelompokkan berdasarkan nama kategori
+                return new
+                {
+                    TicketsPerCategories = groupedByCategory
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An error occurred while fetching available tickets.");
+                return new
+                {
+                    status = 500,
+                    message = "Internal server error occurred while fetching tickets."
+                };
+            }
+        }
+
+
+        public async Task<object> GetSingleTicket(string ticketCode)
+        {
+            _logger.LogInformation("Fetching available tickets with code: {TicketCode}", ticketCode);
+
+            try
+            {
+                var query = _db.Tickets
+                .Where(t => t.TicketCode == ticketCode)
+                .AsQueryable();
+
+                // Error Handling
+                var totalTickets = await query.CountAsync();
+                if (totalTickets == 0)
+                {
+                    // Mengembalikan pesan error jika query-nya kosong
+                    return new
+                    {
+                        type = "https://example.com/probs/ticket-not-found",
+                        title = "Ticket Not Found",
+                        status = 404,
+                        detail = $"No ticket found based on the provided ticket code.",
+                        instance = $"/api/v1/get-single-ticket"
+                    };
+                }
+
+                // Pagination
+                var ticket = await query
+                    .Select(Q => new TicketModel
+                    {
+                        EventDate = Q.EventDate,
+                        Quota = Q.Quota,
+                        TicketCode = Q.TicketCode,
+                        TicketName = Q.TicketName,
+                        CategoryName = Q.TicketCategory.CategoryName,
+                        Price = Q.Price
+                    }).FirstOrDefaultAsync();
+
+                _logger.LogInformation("Successfully retrieved ticket with code: {TicketCode}.", ticketCode);
+
+                return new
+                {
+                    Ticket = ticket,
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An error occurred while fetching available tickets.");
+                return new
+                {
+                    status = 500,
+                    message = "Internal server error occurred while fetching tickets."
                 };
             }
         }
@@ -278,6 +388,93 @@ namespace Acceloka.Services
             };
         }
 
+        public async Task<object> GetAllBookedTickets(
+            int pageNumber = 1,
+            int bookingsPerPage = 10)
+        {
+            _logger.LogInformation("Fetching all booked tickets");
+
+            try
+            {
+                var allBookedTickets = await _db.BookedTickets.ToListAsync();
+
+                // Pagination
+                var bookedTickets = await _db.BookedTickets
+                    .OrderBy(bt => bt.BookedTicketId)
+                    .Skip((pageNumber - 1) * bookingsPerPage)
+                    .Take(bookingsPerPage)
+                    .ToListAsync();
+
+                // Error Handling
+                var totalBookings = allBookedTickets.Count();
+                if (totalBookings == 0)
+                {
+                    _logger.LogWarning("Booked tickets not found.");
+                    return new
+                    {
+                        type = "https://example.com/probs/booked-tickets-not-found",
+                        title = "Booked Ticket Not Found",
+                        status = 404,
+                        detail = "No booked tickets can be found.",
+                        instance = "/api/v1/get-available-booked-tickets"
+                    };
+                }
+
+                _logger.LogInformation("All booked tickets found. Fetching details...");
+
+                var bookedTicketDetails = await _db.BookedTicketDetails
+                    .Include(t => t.TicketCodeNavigation) // Include Tabel Ticket
+                    .ThenInclude(tc => tc.TicketCategory) // Include Tabel TicketCategory
+                    .Where(detail => bookedTickets
+                        .Select(b => b.BookedTicketId).Contains(detail.BookedTicketId)
+                        )
+                    .ToListAsync();
+
+                var bookings = bookedTickets
+                    .Select(ticket => new
+                    {
+                        BookedTicketId = ticket.BookedTicketId,
+                        TotalPrice = ticket.TotalPrice,
+                        BookingDate = ticket.CreatedAt,
+                        Details = bookedTicketDetails
+                            .Where(detail => detail.BookedTicketId == ticket.BookedTicketId)
+                            .GroupBy(detail => detail.TicketCodeNavigation?.TicketCategory.CategoryName)
+                            .Select(g => new
+                            {
+                                CategoryName = g.Key,
+                                QtyPerCategory = g.Sum(d => d.Quantity),
+                                Tickets = g.Select(d => new
+                                {
+                                    TicketCode = d.TicketCode,
+                                    TicketName = d.TicketCodeNavigation?.TicketName,
+                                    EventDate = d.TicketCodeNavigation?.EventDate,
+                                    Quantity = d.Quantity,
+                                }).ToList()
+                            }).ToList()
+                    });
+
+                _logger.LogInformation("Successfully fetched booked tickets with details.");
+
+                return new
+                {
+                    Bookings = bookings,
+                    TotalBookings = totalBookings,
+                    PageNumber = pageNumber,
+                    ItemsPerPage = bookingsPerPage
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An error occurred while fetching booked tickets.");
+                return new
+                {
+                    status = 500,
+                    message = "Internal server error occurred while fetching booked tickets."
+                };
+            }
+
+        }
+
         public async Task<object> GetBookedTicket(int bookedTicketId)
         {
             _logger.LogInformation("Fetching booked ticket with ID: {BookedTicketId}", bookedTicketId);
@@ -322,7 +519,8 @@ namespace Acceloka.Services
                     {
                         TicketCode = t.TicketCode,
                         TicketName = t.TicketCodeNavigation?.TicketName,
-                        EventDate = t.TicketCodeNavigation?.EventDate
+                        EventDate = t.TicketCodeNavigation?.EventDate,
+                        Quantity = t.Quantity,
                     }).ToList()
                 });
 
@@ -361,7 +559,8 @@ namespace Acceloka.Services
                 .Where(d => d.BookedTicketId == bookedTicketId)
                 .Where(d => d.TicketCode == ticketCode)
                 .FirstOrDefaultAsync();
-            
+
+            // ERROR HANDLING
             if (bookedTicketDetail == null)
             {
                 // Mengembalikan pesan error jika kode tiket tidak terdaftar
@@ -390,14 +589,41 @@ namespace Acceloka.Services
                 };
             }
 
-            // Update kolom qty pada tiket yang di revoke
+            // Update kolom qty pada tiket yang di revoke dan update quota dari instance Ticket
+            var ticket = await _db.Tickets
+                .Where(t => t.TicketCode == bookedTicketDetail.TicketCode)
+                .FirstOrDefaultAsync();
+
             if (bookedTicketDetail.Quantity - quantity == 0)
             {
                 _logger.LogInformation($"Remove ticket {ticketCode} from BookedTicketId {bookedTicketId} because its quantity become 0.");
+
+                if (ticket != null)
+                {
+                    _logger.LogInformation("Added the quota of ticket with code {TicketCode} by {Quantity}.", ticket.TicketCode, quantity);
+                    ticket.Quota += quantity;
+                    await _db.SaveChangesAsync();
+                }
+                else
+                {
+                    _logger.LogWarning("Ticket with code {TicketCode} not found.", bookedTicketDetail.TicketCode);
+                }
+
                 _db.BookedTicketDetails.Remove(bookedTicketDetail);
             }
             else
             {
+                if (ticket != null)
+                {
+                    _logger.LogInformation("Added the quota of ticket with code {TicketCode} by {Quantity}.", ticket.TicketCode, quantity);
+                    ticket.Quota += quantity;
+                    await _db.SaveChangesAsync();
+                }
+                else
+                {
+                    _logger.LogWarning("Ticket with code {TicketCode} not found.", bookedTicketDetail.TicketCode);
+                }
+
                 bookedTicketDetail.Quantity -= quantity;
                 _logger.LogInformation($"Decreasing the quantity of ticket {ticketCode} in BookedTicketId {bookedTicketId}. Remaining quantity: {bookedTicketDetail.Quantity}");
             }
@@ -514,6 +740,33 @@ namespace Acceloka.Services
                 }
                 else
                 {
+                    // Update kolom qty pada tiket yang di revoke dan update quota dari instance Ticket
+                    var ticket = await _db.Tickets
+                        .Where(t => t.TicketCode == booking.TicketCode)
+                        .FirstOrDefaultAsync();
+
+                    if (ticket != null)
+                    {
+                        var qtyDiff = booking.Quantity - bookedTicketDetail.Quantity;
+
+                        if (qtyDiff >= 0) 
+                        {
+                            _logger.LogInformation("Minus the quota of ticket with code {TicketCode} by {QtyDiff}.", ticket.TicketCode, qtyDiff);
+                            ticket.Quota -= qtyDiff;
+                        } 
+                        else
+                        {
+                            _logger.LogInformation("Add the quota of ticket with code {TicketCode} by {QtyDiff}.", ticket.TicketCode, qtyDiff);
+                            ticket.Quota += qtyDiff;
+                        }
+
+                        await _db.SaveChangesAsync();
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Ticket with code {TicketCode} not found.", bookedTicketDetail.TicketCode);
+                    }
+
                     _logger.LogInformation($"Updating quantity for ticket code '{booking.TicketCode}' in BookedTicketId {bookedTicketId} to {booking.Quantity}.");
                     bookedTicketDetail.Quantity = booking.Quantity;
                     await _db.SaveChangesAsync();

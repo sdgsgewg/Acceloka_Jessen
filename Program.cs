@@ -14,6 +14,23 @@ Log.Logger = new LoggerConfiguration()
 // Gunakan Serilog sebagai logger utama sebelum membangun aplikasi
 builder.Host.UseSerilog();
 
+// CORS
+//builder.Services.AddCors(options =>
+//{
+//    options.AddPolicy("AllowAllOrigins",
+//        policy => policy.AllowAnyOrigin()
+//                        .AllowAnyMethod()
+//                        .AllowAnyHeader());
+//});
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowNextJs",
+        policy => policy.WithOrigins("http://localhost:3000") // Sesuaikan dengan frontend Next.js
+                        .AllowAnyHeader()
+                        .AllowAnyMethod());
+});
+
 // Add services to the container.
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -40,6 +57,10 @@ if (app.Environment.IsDevelopment())
 
 // Logging request dengan Serilog
 app.UseSerilogRequestLogging();
+
+// Terapkan CORS sebelum Authorization
+//app.UseCors("AllowAllOrigins");
+app.UseCors("AllowNextJs");
 
 app.UseAuthorization();
 app.MapControllers();

@@ -48,6 +48,40 @@ namespace Acceloka.Controllers
             }
         }
 
+        [HttpGet("get-available-ticket-by-category")]
+        public async Task<IActionResult> GetAvailableTicketsByCategory()
+        {
+            _logger.LogInformation("Fetching available tickets by category name.");
+
+            try
+            {
+                var result = await _service.GetAvailableTicketsByCategory();
+                return Ok(result);
+            }
+            catch(Exception ex) 
+            {
+                _logger.LogError(ex, "Error fetching tickets by category name");
+                return StatusCode(500, "Internal Server Error");
+            }
+        }
+
+        [HttpGet("get-single-ticket/{ticketCode}")]
+        public async Task<IActionResult> GetSingleTicket(string ticketCode)
+        {
+            _logger.LogInformation("Fetching ticket with code: {TicketCode}", ticketCode);
+
+            try
+            {
+                var result = await _service.GetSingleTicket(ticketCode);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching ticket");
+                return StatusCode(500, "Internal Server Error");
+            }
+        }
+
         [HttpPost("book-ticket")]
         public async Task<IActionResult> BookTickets([FromBody] BookTicketRequest request)
         {
@@ -62,6 +96,25 @@ namespace Acceloka.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error booking ticket");
+                return StatusCode(500, "Internal Server Error");
+            }
+        }
+
+        [HttpGet("get-all-booked-ticket")]
+        public async Task<IActionResult> GetAllBookedTickets(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int bookingsPerPage = 10)
+        {
+            _logger.LogInformation("Fetching all booked tickets");
+
+            try
+            {
+                var result = await _service.GetAllBookedTickets(pageNumber, bookingsPerPage);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching booked tickets");
                 return StatusCode(500, "Internal Server Error");
             }
         }
